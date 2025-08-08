@@ -5,9 +5,7 @@ import { mockLookup } from "@/lib/mockDb";
 import OpenAI from "openai";
 
 export const runtime = "nodejs";
-
-// 最大アップロードサイズ（Next.js 14 新仕様）
-export const maxSize = "10mb";
+export const sizeLimit = "10mb"; // ← 新しい形式
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
