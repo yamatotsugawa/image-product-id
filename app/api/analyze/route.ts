@@ -170,5 +170,10 @@ function estimateUsedPrice({ msrp }: { msrp: number }) {
   return { min, max };
 }
 
-// Next.js 14 推奨の方法でリクエストサイズ制限を設定
-export const sizeLimit = "10mb";
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "10mb",
+    },
+  },
+};
