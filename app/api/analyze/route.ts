@@ -169,3 +169,6 @@ function estimateUsedPrice({ msrp }: { msrp: number }) {
   const max = Math.round(msrp * 0.7);
   return { min, max };
 }
+
+// Next.js 14 推奨の方法でリクエストサイズ制限を設定
+export const sizeLimit = "10mb";
