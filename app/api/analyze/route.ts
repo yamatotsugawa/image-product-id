@@ -6,6 +6,9 @@ import OpenAI from "openai";
 
 export const runtime = "nodejs";
 
+// 最大アップロードサイズ（Next.js 14 新仕様）
+export const maxSize = "10mb";
+
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 /** 画像→基本項目 抽出 */
@@ -24,10 +27,10 @@ type Vision = z.infer<typeof VisionSchema>;
 
 /** 追加リサーチ：文章2項目（円表記統一） */
 const EnrichSchema = z.object({
-  detail_description: z.string().optional(), // 詳細説明（定価も円で含める）
-  market_overview: z.string().optional(),    // 市場での流通価格（中古・中古相場）
-  official_release: z.string().optional(),   // YYYY / YYYY-MM / YYYY-MM-DD
-  official_msrp_jpy: z.number().optional(),  // 円（数値）
+  detail_description: z.string().optional(),
+  market_overview: z.string().optional(),
+  official_release: z.string().optional(),
+  official_msrp_jpy: z.number().optional(),
 });
 type Enriched = z.infer<typeof EnrichSchema>;
 
@@ -35,7 +38,7 @@ export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
 
-    // 複数: images / 単体互換: image
+    // 複数 or 単体互換
     let files = form.getAll("images") as File[];
     const single = form.get("image") as File | null;
     if (files.length === 0 && single) files = [single];
@@ -47,8 +50,8 @@ export async function POST(req: NextRequest) {
       files.slice(0, 5).map(async (f) => Buffer.from(await f.arrayBuffer()).toString("base64"))
     );
 
-    // ---- Step 1: 画像 → 基本情報抽出（構造化JSON） ----
-    const visionPrompt = `以下のJSONだけを返してください（余計な文字は一切出力しない）:
+    // ---- Step 1: 画像 → 基本情報抽出 ----
+    const visionPrompt = `以下のJSONだけを返してください（余計な文字は出さない）:
 {
   "name": string, "model": string,
   "jan": string,  "upc": string,
@@ -84,19 +87,19 @@ export async function POST(req: NextRequest) {
       // 失敗しても続行
     }
 
-    // ---- Step 2: 追加リサーチ（文章2項目・円表記統一） ----
+    // ---- Step 2: 追加リサーチ ----
     let extra: Enriched | null = null;
     const query = vision.name || vision.jan || vision.upc || vision.model;
     if (query) {
       const enrichPrompt = `あなたは日本語で出力する商品リサーチャーです。次の対象について、
 「詳細説明」と「市場での流通価格（中古・中古相場）」の2項目だけを含むJSONを返してください。
-金額は必ず円（JPY）のみ、3桁区切り+「円」表記（例: 35,200円）で書いてください。定価は必ず含めてください。
+金額は必ず円（JPY）のみ、3桁区切り+「円」表記で書いてください。定価は必ず含めてください。
 schema:
 {
-  "detail_description": string, // アルコール度数・容量・初出発売年・定価（円）を含めた200字以内の説明（日本語）
-  "market_overview": string,    // メルカリ/ヤフオク/通販などの流通相場を文章で（すべて円表記）
-  "official_release": string,   // 例: "1992" or "1992-10"
-  "official_msrp_jpy": number   // 定価（円, 数値）不明なら0
+  "detail_description": string,
+  "market_overview": string,
+  "official_release": string,
+  "official_msrp_jpy": number
 }
 対象: ${query}`;
 
@@ -126,34 +129,23 @@ schema:
       model: vision.model || "",
     });
 
-    // 中古相場の簡易フォールバック（使わない場合もあるが用意）
     const fallbackUsed = estimateUsedPrice({
-      msrp:
-        extra?.official_msrp_jpy ||
-        mock?.official_msrp ||
-        vision.msrp ||
-        0,
+      msrp: extra?.official_msrp_jpy || mock?.official_msrp || vision.msrp || 0,
     });
 
-    // 返却
     return NextResponse.json({
-      // 基本抽出
       ...vision,
-      msrp_currency: "JPY", // 表示側は円を前提
-      // 文章2項目＋補助情報
+      msrp_currency: "JPY",
       enriched: {
         title: mock?.title,
         official_release: extra?.official_release || mock?.official_release || vision.release_date,
         official_msrp: extra?.official_msrp_jpy || mock?.official_msrp || vision.msrp,
         currency: "JPY",
-        description: extra?.detail_description, // ← 詳細説明
-        // 文章の市場概観（中古・中古相場）
+        description: extra?.detail_description,
         market_overview: extra?.market_overview,
-        // 参考：フォールバックで使うときのざっくり相場帯
         used_hint_min: fallbackUsed?.min,
         used_hint_max: fallbackUsed?.max,
       },
-      // 旧フィールド（UIで使わないなら無視される）
       used_price_min: fallbackUsed?.min,
       used_price_max: fallbackUsed?.max,
       used_price_currency: "JPY",
@@ -165,15 +157,8 @@ schema:
 
 function estimateUsedPrice({ msrp }: { msrp: number }) {
   if (!msrp || msrp <= 0) return null;
-  const min = Math.round(msrp * 0.35);
-  const max = Math.round(msrp * 0.7);
-  return { min, max };
+  return {
+    min: Math.round(msrp * 0.35),
+    max: Math.round(msrp * 0.7),
+  };
 }
-
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: "10mb",
-    },
-  },
-};
