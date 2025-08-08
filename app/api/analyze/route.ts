@@ -5,9 +5,10 @@ import { mockLookup } from "@/lib/mockDb";
 import OpenAI from "openai";
 
 export const runtime = "nodejs";
-export const sizeLimit = "10mb"; // ← 新しい形式
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 /** 画像→基本項目 抽出 */
 const VisionSchema = z.object({
@@ -34,6 +35,16 @@ type Enriched = z.infer<typeof EnrichSchema>;
 
 export async function POST(req: NextRequest) {
   try {
+    // --- サイズ制限チェック ---
+    const contentLength = req.headers.get("content-length");
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (contentLength && parseInt(contentLength) > maxSize) {
+      return NextResponse.json(
+        { error: "File too large. Limit is 10MB." },
+        { status: 413 }
+      );
+    }
+
     const form = await req.formData();
 
     // 複数 or 単体互換
@@ -45,7 +56,9 @@ export async function POST(req: NextRequest) {
     }
 
     const b64s = await Promise.all(
-      files.slice(0, 5).map(async (f) => Buffer.from(await f.arrayBuffer()).toString("base64"))
+      files.slice(0, 5).map(async (f) =>
+        Buffer.from(await f.arrayBuffer()).toString("base64")
+      )
     );
 
     // ---- Step 1: 画像 → 基本情報抽出 ----
@@ -128,7 +141,11 @@ schema:
     });
 
     const fallbackUsed = estimateUsedPrice({
-      msrp: extra?.official_msrp_jpy || mock?.official_msrp || vision.msrp || 0,
+      msrp:
+        extra?.official_msrp_jpy ||
+        mock?.official_msrp ||
+        vision.msrp ||
+        0,
     });
 
     return NextResponse.json({
@@ -136,8 +153,14 @@ schema:
       msrp_currency: "JPY",
       enriched: {
         title: mock?.title,
-        official_release: extra?.official_release || mock?.official_release || vision.release_date,
-        official_msrp: extra?.official_msrp_jpy || mock?.official_msrp || vision.msrp,
+        official_release:
+          extra?.official_release ||
+          mock?.official_release ||
+          vision.release_date,
+        official_msrp:
+          extra?.official_msrp_jpy ||
+          mock?.official_msrp ||
+          vision.msrp,
         currency: "JPY",
         description: extra?.detail_description,
         market_overview: extra?.market_overview,
@@ -149,7 +172,10 @@ schema:
       used_price_currency: "JPY",
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || "internal error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "internal error" },
+      { status: 500 }
+    );
   }
 }
 
